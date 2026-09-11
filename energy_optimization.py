@@ -1,9 +1,10 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 
-INPUT_FILE = "network_data_with_efficiency.csv"
+INPUT_FILE = Path(__file__).with_name("dataset") / "network_data_with_efficiency.csv"
 OUTPUT_FILE = "decision_results.csv"
 
 SLEEP_THRESHOLD = 0.15
