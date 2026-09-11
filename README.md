@@ -1,11 +1,11 @@
 # Orange Nokia Graduation Project
 
-## Run
+## Run the dashboard
 
 Install the required packages:
 
 ```bash
-python3 -m pip install pandas numpy matplotlib
+python3 -m pip install pandas streamlit
 ```
 
 Place the input CSV at:
@@ -14,11 +14,11 @@ Place the input CSV at:
 dataset/network_data_with_efficiency.csv
 ```
 
-Then run from the project folder:
+Start the Streamlit dashboard from the project folder:
 
 ```bash
 cd ~/Desktop/orange-nokia-graduation-project
-python3 energy_optimization.py
+streamlit run app.py
 ```
 
-The script creates `decision_results.csv` in the folder where you run the command.
+The browser opens automatically. You can also upload a CSV from the dashboard and download the decision results.
