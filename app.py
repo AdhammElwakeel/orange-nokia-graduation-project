@@ -39,10 +39,19 @@ REQUIRED_COLUMNS = {
 st.set_page_config(page_title="Network Energy Optimization", layout="wide")
 st.title("AI-Based Network Energy Optimization")
 
+uploaded_file = st.sidebar.file_uploader(
+    "Upload cell sleep distribution report", type="csv"
+)
 try:
-    report = pd.read_csv(REPORT_FILE)
-except FileNotFoundError:
-    st.error(f"Report file not found: {REPORT_FILE}")
+    if uploaded_file:
+        report = pd.read_csv(uploaded_file)
+    elif REPORT_FILE.exists():
+        report = pd.read_csv(REPORT_FILE)
+    else:
+        st.info("Upload a cell sleep distribution report CSV to view its results.")
+        st.stop()
+except (OSError, UnicodeDecodeError, pd.errors.ParserError) as error:
+    st.error(f"Could not read the CSV: {error}")
     st.stop()
 
 missing = REQUIRED_COLUMNS - set(report.columns)
