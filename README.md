@@ -5,7 +5,7 @@
 Install the required packages:
 
 ```bash
-python3 -m pip install pandas streamlit
+python3 -m pip install pandas streamlit altair
 ```
 
 Start the dashboard:
@@ -15,4 +15,6 @@ cd ~/Desktop/orange-nokia-graduation-project
 streamlit run app.py
 ```
 
-Upload a `cell_sleep_distribution_report.csv` file in the sidebar to view its energy, cell-state, and load-distribution results. On this computer, the dashboard automatically loads `~/Desktop/cell_sleep_distribution_report.csv` when no file is uploaded.
+The dashboard automatically uses `dataset/network_data_with_efficiency.csv`. You can also upload another CSV with `Time`, `Cell`, `Load_Ratio`, and `Energy_W` columns.
+
+It keeps at least two cells active, compares before/after load at two timestamps, and lets you download the decision results.

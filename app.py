@@ -1,133 +1,116 @@
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
-
-REPORT_FILE = Path.home() / "Desktop" / "cell_sleep_distribution_report.csv"
-def distribution_chart_data(distribution):
-    if distribution == "-":
-        return pd.DataFrame(columns=["Sleeping cell", "Receiving cell", "Load moved (%)"])
-
-    rows = []
-    for transfer in distribution.split(" | "):
-        source, receivers = transfer.split(" -> ", 1)
-        for receiver in receivers.split(", "):
-            cell, percentage = receiver.rsplit(" (", 1)
-            rows.append({
-                "Sleeping cell": source,
-                "Receiving cell": cell,
-                "Load moved (%)": float(percentage.removesuffix("%)")),
-            })
-    return pd.DataFrame(rows)
+from energy_optimization import MAX_LOAD, MIN_ACTIVE_CELLS, SLEEP_THRESHOLD, optimize
 
 
-REQUIRED_COLUMNS = {
-    "Time",
-    "Sleep_Cells",
-    "Standby_Cells",
-    "Active_Cells",
-    "Load_Distribution",
-    "Sleep_Count",
-    "Standby_Count",
-    "Active_Count",
-    "Total_Energy_Saved_W",
-    "Total_Energy_Before_W",
-    "Savings_pct",
-}
+INPUT_FILE = Path(__file__).with_name("dataset") / "network_data_with_efficiency.csv"
+
+
+def load_chart(data, title):
+    cells = data["Cell"].tolist()
+    loads = data.melt(
+        id_vars="Cell",
+        value_vars=["Original_Load_%", "Final_Load_%"],
+        var_name="Load",
+        value_name="Load (%)",
+    ).replace({"Original_Load_%": "Original Load", "Final_Load_%": "Final Load"})
+    bars = alt.Chart(loads).mark_bar().encode(
+        x=alt.X("Cell:N", sort=cells, title="Cell"),
+        xOffset="Load:N",
+        y=alt.Y("Load (%):Q", scale=alt.Scale(domain=[0, 100])),
+        color=alt.Color("Load:N", title=None),
+        tooltip=["Cell:N", "Load:N", "Load (%):Q"],
+    )
+    maximum = alt.Chart(pd.DataFrame({"Load (%)": [MAX_LOAD * 100]})).mark_rule(
+        color="#1f77b4", strokeDash=[6, 4]
+    ).encode(y="Load (%):Q")
+    threshold = alt.Chart(pd.DataFrame({"Load (%)": [SLEEP_THRESHOLD * 100]})).mark_rule(
+        color="#ff7f0e", strokeDash=[2, 2]
+    ).encode(y="Load (%):Q")
+    return alt.layer(bars, maximum, threshold).properties(title=title, height=400)
+
 
 st.set_page_config(page_title="Network Energy Optimization", layout="wide")
 st.title("AI-Based Network Energy Optimization")
+st.caption("Dashed line: 85% maximum load. Dotted line: 15% sleep threshold.")
 
-uploaded_file = st.sidebar.file_uploader(
-    "Upload cell sleep distribution report", type="csv"
-)
+uploaded_file = st.sidebar.file_uploader("Upload network data CSV", type="csv")
 try:
-    if uploaded_file:
-        report = pd.read_csv(uploaded_file)
-    elif REPORT_FILE.exists():
-        report = pd.read_csv(REPORT_FILE)
+    if uploaded_file is not None:
+        data = pd.read_csv(uploaded_file)
+    elif INPUT_FILE.exists():
+        data = pd.read_csv(INPUT_FILE)
     else:
-        st.info("Upload a cell sleep distribution report CSV to view its results.")
+        st.info("Upload a network data CSV to view its optimization results.")
         st.stop()
-except (OSError, UnicodeDecodeError, pd.errors.ParserError) as error:
-    st.error(f"Could not read the CSV: {error}")
+    results = optimize(data)
+except (OSError, UnicodeDecodeError, ValueError, pd.errors.ParserError) as error:
+    st.error(f"Could not optimize the CSV: {error}")
     st.stop()
 
-missing = REQUIRED_COLUMNS - set(report.columns)
-if missing:
-    st.error(f"Missing required columns: {', '.join(sorted(missing))}")
-    st.stop()
+summary = results.drop_duplicates("Time").sort_values("Time")
+total_before = summary["Energy_Baseline_W"].sum()
+total_after = summary["Energy_After_Optimization_W"].sum()
+saving_percent = (total_before - total_after) / total_before * 100 if total_before else 0
 
-report["Time"] = pd.to_datetime(report["Time"], errors="coerce")
-for column in [
-    "Sleep_Count",
-    "Standby_Count",
-    "Active_Count",
-    "Total_Energy_Saved_W",
-    "Total_Energy_Before_W",
-    "Savings_pct",
-]:
-    report[column] = pd.to_numeric(report[column], errors="coerce")
-if report.isna().any().any():
-    st.error("The report contains invalid dates or numeric values.")
-    st.stop()
+first, second, third, fourth = st.columns(4)
+first.metric("Baseline energy", f"{total_before:.2f} W")
+second.metric("Optimized energy", f"{total_after:.2f} W")
+third.metric("Energy saving", f"{saving_percent:.2f}%")
+fourth.metric("Minimum active cells", int(summary["Number_of_Active_Cells"].min()))
 
-report = report.sort_values("Time")
-total_before = report["Total_Energy_Before_W"].sum()
-total_saved = report["Total_Energy_Saved_W"].sum()
-total_after = total_before - total_saved
-saving_percent = total_saved / total_before * 100 if total_before else 0
-
-first, second, third = st.columns(3)
-first.metric("Total baseline energy", f"{total_before:.2f} W")
-second.metric("Energy after optimization", f"{total_after:.2f} W")
-third.metric("Total energy saved", f"{saving_percent:.2f}%")
-
-st.subheader("Energy Over Time")
-st.line_chart(
-    report.set_index("Time")[["Total_Energy_Before_W", "Total_Energy_Saved_W"]]
-)
+st.subheader("Energy Saving Over Time")
+st.line_chart(summary.set_index("Time")[["Energy_Saving_%"]])
 
 st.subheader("Cell States Over Time")
-st.line_chart(report.set_index("Time")[["Active_Count", "Sleep_Count", "Standby_Count"]])
-
-selected_time = st.selectbox("Select time", report["Time"], format_func=str)
-selected = report[report["Time"] == selected_time].iloc[0]
-
-st.subheader("Selected Decision")
-sleeping, standby, active = st.columns(3)
-sleeping.write("**Sleeping cells**")
-sleeping.write(selected["Sleep_Cells"])
-standby.write("**Standby cells**")
-standby.write(selected["Standby_Cells"])
-active.write("**Active cells**")
-active.write(selected["Active_Cells"])
-
-st.subheader("Load Distribution")
-distribution = distribution_chart_data(selected["Load_Distribution"])
-if distribution.empty:
-    st.info("No load was moved at this time.")
-else:
-    cell_load_movement = pd.concat(
+st.line_chart(
+    summary.set_index("Time")[
         [
-            distribution.groupby("Sleeping cell")["Load moved (%)"]
-            .sum()
-            .rename("Load sent (%)"),
-            distribution.groupby("Receiving cell")["Load moved (%)"]
-            .sum()
-            .rename("Load received (%)"),
-        ],
-        axis=1,
-    ).fillna(0).sort_index()
-    st.bar_chart(cell_load_movement)
-    st.caption("Load moved from each sleeping cell and received by each active cell.")
+            "Number_of_Active_Cells",
+            "Number_of_Sleeping_Cells",
+            "Number_of_Standby_Cells",
+        ]
+    ]
+)
 
-st.subheader("All Decisions")
-st.dataframe(report, use_container_width=True, hide_index=True)
+times = summary["Time"].tolist()
+if len(times) < 2:
+    st.error("The dataset needs at least two timestamps for comparison.")
+    st.stop()
+
+st.subheader("Compare Two Timestamps")
+left, right = st.columns(2)
+first_time = left.selectbox("First timestamp", times, format_func=str)
+second_time = right.selectbox(
+    "Second timestamp", [time for time in times if time != first_time], format_func=str
+)
+
+first_data = results[results["Time"] == first_time].sort_values("Cell")
+second_data = results[results["Time"] == second_time].sort_values("Cell")
+left.altair_chart(load_chart(first_data, str(first_time)), use_container_width=True)
+right.altair_chart(load_chart(second_data, str(second_time)), use_container_width=True)
+
+load_change = (
+    first_data.set_index("Cell")["Final_Load_%"]
+    .rename("First timestamp")
+    .to_frame()
+    .join(second_data.set_index("Cell")["Final_Load_%"].rename("Second timestamp"))
+)
+load_change["Final Load Change (%)"] = (
+    load_change["Second timestamp"] - load_change["First timestamp"]
+)
+st.subheader("Final Load Change Between Timestamps")
+st.bar_chart(load_change[["Final Load Change (%)"]])
+
+st.subheader("Decisions")
+st.dataframe(second_data, use_container_width=True, hide_index=True)
 st.download_button(
-    "Download report",
-    report.to_csv(index=False).encode(),
-    "cell_sleep_distribution_report.csv",
+    "Download decision results",
+    results.to_csv(index=False).encode(),
+    "decision_results.csv",
     "text/csv",
 )
