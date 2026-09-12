@@ -5,6 +5,23 @@ import streamlit as st
 
 
 REPORT_FILE = Path.home() / "Desktop" / "cell_sleep_distribution_report.csv"
+def distribution_chart_data(distribution):
+    if distribution == "-":
+        return pd.DataFrame(columns=["Sleeping cell", "Receiving cell", "Load moved (%)"])
+
+    rows = []
+    for transfer in distribution.split(" | "):
+        source, receivers = transfer.split(" -> ", 1)
+        for receiver in receivers.split(", "):
+            cell, percentage = receiver.rsplit(" (", 1)
+            rows.append({
+                "Sleeping cell": source,
+                "Receiving cell": cell,
+                "Load moved (%)": float(percentage.removesuffix("%)")),
+            })
+    return pd.DataFrame(rows)
+
+
 REQUIRED_COLUMNS = {
     "Time",
     "Sleep_Cells",
@@ -78,8 +95,16 @@ standby.write(selected["Standby_Cells"])
 active.write("**Active cells**")
 active.write(selected["Active_Cells"])
 
-st.write("**Load distribution**")
-st.code(selected["Load_Distribution"])
+st.subheader("Load Distribution")
+distribution = distribution_chart_data(selected["Load_Distribution"])
+if distribution.empty:
+    st.info("No load was moved at this time.")
+else:
+    st.bar_chart(
+        distribution.pivot(
+            index="Sleeping cell", columns="Receiving cell", values="Load moved (%)"
+        ).fillna(0)
+    )
 
 st.subheader("All Decisions")
 st.dataframe(report, use_container_width=True, hide_index=True)
