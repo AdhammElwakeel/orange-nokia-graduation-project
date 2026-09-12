@@ -109,11 +109,19 @@ distribution = distribution_chart_data(selected["Load_Distribution"])
 if distribution.empty:
     st.info("No load was moved at this time.")
 else:
-    st.bar_chart(
-        distribution.pivot(
-            index="Sleeping cell", columns="Receiving cell", values="Load moved (%)"
-        ).fillna(0)
-    )
+    cell_load_movement = pd.concat(
+        [
+            distribution.groupby("Sleeping cell")["Load moved (%)"]
+            .sum()
+            .rename("Load sent (%)"),
+            distribution.groupby("Receiving cell")["Load moved (%)"]
+            .sum()
+            .rename("Load received (%)"),
+        ],
+        axis=1,
+    ).fillna(0).sort_index()
+    st.bar_chart(cell_load_movement)
+    st.caption("Load moved from each sleeping cell and received by each active cell.")
 
 st.subheader("All Decisions")
 st.dataframe(report, use_container_width=True, hide_index=True)
