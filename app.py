@@ -3,57 +3,89 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from energy_optimization import optimize
 
-
-DEFAULT_INPUT = Path(__file__).with_name("dataset") / "network_data_with_efficiency.csv"
+REPORT_FILE = Path.home() / "Desktop" / "cell_sleep_distribution_report.csv"
+REQUIRED_COLUMNS = {
+    "Time",
+    "Sleep_Cells",
+    "Standby_Cells",
+    "Active_Cells",
+    "Load_Distribution",
+    "Sleep_Count",
+    "Standby_Count",
+    "Active_Count",
+    "Total_Energy_Saved_W",
+    "Total_Energy_Before_W",
+    "Savings_pct",
+}
 
 st.set_page_config(page_title="Network Energy Optimization", layout="wide")
 st.title("AI-Based Network Energy Optimization")
 
-uploaded_file = st.sidebar.file_uploader("Upload network CSV", type="csv")
 try:
-    data = pd.read_csv(uploaded_file or DEFAULT_INPUT)
-    results = optimize(data)
-except (FileNotFoundError, ValueError, pd.errors.ParserError) as error:
-    st.error(str(error))
+    report = pd.read_csv(REPORT_FILE)
+except FileNotFoundError:
+    st.error(f"Report file not found: {REPORT_FILE}")
     st.stop()
 
-summary = results.drop_duplicates("Time").sort_values("Time")
-baseline = summary["Energy_Baseline_W"].sum()
-optimized = summary["Energy_After_Optimization_W"].sum()
-saving = (baseline - optimized) / baseline * 100 if baseline else 0
+missing = REQUIRED_COLUMNS - set(report.columns)
+if missing:
+    st.error(f"Missing required columns: {', '.join(sorted(missing))}")
+    st.stop()
+
+report["Time"] = pd.to_datetime(report["Time"], errors="coerce")
+for column in [
+    "Sleep_Count",
+    "Standby_Count",
+    "Active_Count",
+    "Total_Energy_Saved_W",
+    "Total_Energy_Before_W",
+    "Savings_pct",
+]:
+    report[column] = pd.to_numeric(report[column], errors="coerce")
+if report.isna().any().any():
+    st.error("The report contains invalid dates or numeric values.")
+    st.stop()
+
+report = report.sort_values("Time")
+total_before = report["Total_Energy_Before_W"].sum()
+total_saved = report["Total_Energy_Saved_W"].sum()
+total_after = total_before - total_saved
+saving_percent = total_saved / total_before * 100 if total_before else 0
 
 first, second, third = st.columns(3)
-first.metric("Total baseline energy", f"{baseline:.2f} W")
-second.metric("Optimized energy", f"{optimized:.2f} W")
-third.metric("Energy saving", f"{saving:.2f}%")
+first.metric("Total baseline energy", f"{total_before:.2f} W")
+second.metric("Energy after optimization", f"{total_after:.2f} W")
+third.metric("Total energy saved", f"{saving_percent:.2f}%")
 
-st.subheader("Energy Saving Over Time")
-st.line_chart(summary.set_index("Time")["Energy_Saving_%"])
-
-st.subheader("Cell States Over Time")
+st.subheader("Energy Over Time")
 st.line_chart(
-    summary.set_index("Time")[
-        [
-            "Number_of_Active_Cells",
-            "Number_of_Sleeping_Cells",
-            "Number_of_Standby_Cells",
-        ]
-    ]
+    report.set_index("Time")[["Total_Energy_Before_W", "Total_Energy_Saved_W"]]
 )
 
-selected_time = st.selectbox("Select time", summary["Time"], format_func=str)
-selected = results[results["Time"] == selected_time].sort_values("Cell")
+st.subheader("Cell States Over Time")
+st.line_chart(report.set_index("Time")[["Active_Count", "Sleep_Count", "Standby_Count"]])
 
-st.subheader("Load Before and After Optimization")
-st.bar_chart(selected.set_index("Cell")[["Original_Load_%", "Final_Load_%"]])
+selected_time = st.selectbox("Select time", report["Time"], format_func=str)
+selected = report[report["Time"] == selected_time].iloc[0]
 
-st.subheader("Decisions")
-st.dataframe(selected, use_container_width=True, hide_index=True)
+st.subheader("Selected Decision")
+sleeping, standby, active = st.columns(3)
+sleeping.write("**Sleeping cells**")
+sleeping.write(selected["Sleep_Cells"])
+standby.write("**Standby cells**")
+standby.write(selected["Standby_Cells"])
+active.write("**Active cells**")
+active.write(selected["Active_Cells"])
+
+st.write("**Load distribution**")
+st.code(selected["Load_Distribution"])
+
+st.subheader("All Decisions")
+st.dataframe(report, use_container_width=True, hide_index=True)
 st.download_button(
-    "Download decision results",
-    results.to_csv(index=False).encode(),
-    "decision_results.csv",
+    "Download report",
+    report.to_csv(index=False).encode(),
+    "cell_sleep_distribution_report.csv",
     "text/csv",
 )
